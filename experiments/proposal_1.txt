@@ -1,0 +1,24 @@
+Expérience proposée n°1 :
+=========================
+
+Objectif : Comprendre l'évolution de l'estimation d'une matrice de covariance sur un échantillon de taille n, n constant puis n croissant.
+
+Données : 
+ - Une matrice C* de référence. 
+ - Une série de données avec $n_0$ grand distribuée selon une loi normale et log-normale avec une covariance asymptotiquement égale à C*
+
+Expériences : 
+1. Mettre en place un code R qui permet d'obtenir la matrice de covariance empirique d'un échantillon de taille $n \leq n_0$ ;
+2. Comparer votre estimation avec une estimation faite par une méthode de référence en R ;
+3. Soit un échantillon E, on estime la matrice $cov_{emp}(E)$ avec la procédure 1. ou 2.. Mettre en place une comparaison quantitative entre $cov_{emp}(E)$ et $C*$. Décrire les propriétés de l'opéarateur de comparison proposé.
+4. Estimer la variabilité de $cov_{emp}(E)$ lorsque le cardinal de E vérifie, $\mid E\mid = n$ avec $n$ constant ? ;
+5. Estimer la notion de convergence asymptotique de $cov_{emp}(E)$ vers C* sur l'échantillon considéré.
+
+Questions théoriques à résoudre : 
+1. Comment calculer cov_{emp}(E) ?
+2. Comment comparer cov_{emp}(E) et C* ?
+3. Comment mesurer la distribution de $cov_{emp}(E)$ ?
+4. Comment caractériser la convergence asymptotique ?
+
+Approfondissement :
+Comment générer les données ? 
