@@ -1,0 +1,170 @@
+---
+title: "Experiment 1"
+author: "Joanna Moncelet"
+date: "2026-05-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+getwd()
+setwd("C:/Perso/stage/stage LIMOS/Projet stage/Joanna")
+```
+
+# Données
+
+```{r}
+#série de données:
+X <- as.matrix(read_excel("./data/Actifs_experiments_1_data_large.xlsx", col_names = FALSE))
+n0 <- nrow(X)  # 200 000
+p  <- ncol(X)  # 20
+
+
+#matrice de référence C*:
+chargement <- function(path) {
+  data <- read.csv(path, row.names = 1)
+  data[] <- lapply(data, function(col) as.numeric(gsub("^\\.", "", col))) #enleve le point dans Asset_10 colonne 1
+  m <- as.matrix(data)
+  lower <- lower.tri(m, diag = TRUE) #symétrise la matrice
+  m[upper.tri(m)] <- t(m)[upper.tri(m)]
+  m
+}
+#uper.tri : partie supérieure de la matrice
+#t la transposée de la matrice
+
+
+C_etoile <- chargement("./data/covariance.csv")
+```
+
+# 1.Mettre en place un code R qui permet d'obtenir la matrice de covariance empirique d'un échantillon de taille $n \leq n_0$
+
+```{r}
+cov_empirique <- function(X) {
+  n <- nrow(X)
+  p <- ncol(X)
+  C <- matrix(0, p, p)
+  x_bar <- colMeans(X)
+  for (j in 1:p) {
+    for (k in 1:p) {
+      C[j, k] <- sum((X[, j] - x_bar[j]) * (X[, k] - x_bar[k])) / (n - 1)
+    }
+  }
+  C
+}
+```
+
+# 2. Comparer votre estimation avec une estimation faite par une méthode de référence en R
+
+```{r}
+#Comparaison avec la distance (norme)
+#méthode de référence = cov()
+
+cat("diff max entre cov_empirique et cov :", max(abs(cov_empirique(X)- cov(X)), "\n")) 
+# ~0: c'est la même chose
+```
+
+# 3. Soit un échantillon E, on estime la matrice $cov_{emp}(E)$ avec la procédure 1. ou 2. . Mettre en place une comparaison quantitative entre $cov_{emp}(E)$ et $C^*$. Décrire les propriétés de l'opéarateur de comparison proposé.
+
+```{r}
+#Comparaison cov_empirique et C*
+cat("diff max entre cov_empirique et cov() :", max(abs(cov_empirique(X[1:200, ]) - C_etoile)))
+
+
+#et avec échantillon de taille 200:
+cat("diff max entre cov_empirique et cov() pour un échntillon de taille 200 :", max(abs(cov_empirique(X) - C_etoile)))
+
+
+#Norme Frobenius:
+norme_frobenius <- function(A){ 
+  sqrt(sum(A^2))
+}
+
+#Erreur relative:
+erreur_relative <- function(C){
+  norme_frobenius(C - C_etoile) / norme_frobenius(C_etoile)
+}
+```
+
+# 4. Estimer la variabilité de $cov_{emp}(E)$ lorsque le cardinal de E vérifie, $\mid E\mid = n$ avec $n$ constant ?
+
+```{r}
+#Si j'ai bien compris ca veut dire: a quel point cov_emp depend du choix de l'echantillon? 
+```
+
+
+## Bootstrap
+
+```{r}
+n_fixe <- 200
+B      <- 300
+covs   <- array(0, dim = c(p, p, B)) #initialisation
+
+for (b in 1:B) {
+  indice <- sample(n0, size = n_fixe, replace = TRUE)
+  covs[,,b]  <- cov(X[indice, ])
+}
+
+#moyenne des B matrices
+moyenne_bootstrap <- apply(covs, c(1, 2), mean)
+
+#on utilise erreur relative pour voir si la moyenne est proche de C*
+cat("distance ||moyenne_bootstrap - C*|| :", round(erreur_relative(moyenne_bootstrap), 6), "\n") 
+#0.013965 
+```
+
+## Jackknife
+
+```{r}
+#on a enormement d'observations (200 000) donc on va travailler sur un plus petit echantillons (taille 199) vu que jackknife donne n+1 (200) estimations de taille n
+ 
+n_jack <- 199
+X_jack <- X[1:(n_jack + 1), ] 
+covs_jack <- array(0, dim = c(p, p, n_jack + 1)) #init
+ 
+for (i in 1:(n_jack + 1)) {
+  covs_jack[,,i] <- cov(X_jack[-i, ])  #on enlève l'obsrvation i
+}
+moyenne_jackknife <- apply(covs_jack, c(1, 2), mean)
+cat("erreur relative moyenne jackknife :", round(erreur_relative(moyenne_jackknife), 6), "\n") #0.278415 
+```
+
+
+# comparaison bootstrap vs jackknife
+```{r}
+cat("différence ||moy_bootstrap - moy_jackknife|| :", round(norme_frobenius(moyenne_bootstrap - moyenne_jackknife), 8), "\n")
+```
+
+
+# Visualisation
+
+## graphique 1 : densité log return
+
+```{r}
+densite <- density(X[, 1])
+
+plot(densite, main = "Densité", xlab = "", ylab = "", col = "steelblue", lwd = 2)
+points(densite$x, densite$y, pch = 16, col = "steelblue", cex = 0.6)
+abline(h = 0, col = "gray60")
+```
+
+## graphique 2 : erreur relative en fonction de n
+
+```{r}
+n_valeurs <- c(2, 3, 5, 8, 10, 15, 20, 30, 50, 75, 100, 200, 500, 1000, 2000, 5000, 10000, 50000, 100000, 200000)
+erreurs <- numeric(length(n_valeurs)) #init
+
+for (k in seq_along(n_valeurs)) {
+  n         <- n_valeurs[k]
+  erreurs[k] <- erreur_relative(cov(X[1:n, ]))
+}
+
+plot(n_valeurs, erreurs,
+     type = "b", log = "x",
+     main = "norm (n)",
+     xlab = "n", ylab = "erreur relative (%)",
+     col = "steelblue", lwd = 2, pch = 16, cex = 0.7)
+grid()
+
+#convergence asymptotique de cov_emp vers C*: plus n est grand et moins ul y a d'erreur
+```
