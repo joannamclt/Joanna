@@ -1,0 +1,24 @@
+Expérience 2 : Etude des valeurs propres et vecteurs propres d'une matrice PSD (Positive Semi-Definite).
+
+L'objet de cette expérience est de comprendre l'estimation d'une matrice de covariance via le suivi de ses valeurs propres et vecteurs propres associés.
+
+Concernant les valeurs propres, on pourra notamment suivre la trajectoire de leur évolution tout en les representant toujours sous la forme ordonnée : \lambda_1 \geq \lambda_2 \geq ... \ lambda_d.
+Les VP doivent être positives ou nulles. Une possiblité consiste à réaliser un "scree plot" et regarder la proportion de variance expliquée par les k premières valeurs propres.
+On pourra également s'interroger sur les trajectoires des vecteurs propres associés.
+
+La vision géométrique en dimension d=3 est possible via une simulation sur des distributions contrôlées de points. L'idée est de partir d'un point P et de construire un vecteor normal aléatoire n(a,b,c).
+On pourra choisir l'ordre a > b > c > 0 pour les composantes mais ce n'est pas une obligation pour une représentation 3D en opengl puisque la visualisation se voudra interactive.
+La démarche retenue est la suivante : 
+0. On se donne une fonction f(X,Y) : de IR^2 -> IR
+1. On construit une base vectoriel du plan affine IP passant par P et de normale n : 
+   a. On trouve la direction d'axe tel que la projection sur IP du point P + e_k a une norme maximale. On appelle P_i ce point.
+   b. Comme par définition P_i est dans IP, le vecteur v_1 = PP_i / || PP_i || est un vecteur unitaire dans IP.
+   c. Par construction n et v_1 sont orthogonaux, un autre vecteur v_2 unitaire de IP s'obtient par n x v_1 où x dénote le produit vectoriel.
+2. Pour une résolution h fixée à l'avance, on prend tous les points (X,Y) = (i/h,j/h) pour i et j entiers dans [-Dh ; Dh] ou entiers aléatoires uniformément répartis dans le même intervalle.
+   On construit le point M  par M = P + X v_1 + Y v_2 + f(X,Y) n
+On obtient donc une figure contrôlée de la distribution de M. L'amplitude de f, aka |f| décrit précisément l'éloignement maximal de M au plan IP.
+
+Pour des éloignements de plus en plus important, on peut calculer la matrice de covariances des points M. Elle possède trois VP \lambda_1, \lambda_2 et \lambda_3. Il est attendu d'avoir les vecteurs propres associées 
+vp_1, vp_2 et vp_3 avec vp_1, vp_2 "dans" le plan et vp_3 selon n. Il est important de regarder ce point et comment avec l'éloignement des points cette propriété se perd. 
+On commencera notamment par un éloignement nul pour vérifier la situation d'origine où tous les points sont dans le plan.
+
