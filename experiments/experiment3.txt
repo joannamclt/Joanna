@@ -1,0 +1,8 @@
+Experience 3 : 
+Après avoir explicité les solutions du problème MPT de Markowitz, on se posera la question de la régularisation de la matrice de covariances d'actifs.
+
+On propose l'expérience suivante : réaliser la correction par skrinkage et étudier les effets de cette correction sous l'angle : 
+a. de la distance d'estimation à la covariance théorique ; 
+b. de la déformation des valeurs et vecteurs propres.
+
+On pourra visualiser en dimens d=3 les effets des cette correction sur les nuages préalablement étudiés. 
