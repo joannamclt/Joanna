@@ -5,4 +5,23 @@ On propose l'expérience suivante : réaliser la correction par skrinkage et ét
 a. de la distance d'estimation à la covariance théorique ; 
 b. de la déformation des valeurs et vecteurs propres.
 
-On pourra visualiser en dimens d=3 les effets des cette correction sur les nuages préalablement étudiés. 
+On pourra visualiser en dimension d=3 les effets des cette correction sur les nuages préalablement étudiés. 
+
+Le programme d'étude pourra se décomposer en 3 phases :
+1. Mettre en place un shrinkage de type : 
+$\hat{\Sigma} = (1-\lambda)\Sigma + \lambda T$
+ avec $T$ une matrice cible de régularisation et $\lambda$ un réel dans $[0;1]$.
+Pour fixer $T$ on pourra prendre T = \sigma^2 Id, T = diagonale(Covariance empirique), ...
+L'objectif est de sentir l'influence de $\lambda$ sur la matrice régularisée.
+
+2. Faire une recherche pour fixer $\lambda$ par apprentissage validation.
+
+3. Choisir $\lambda$ via la formule : 
+$\lambda* = \frac{bruit sur la matrice de covariance empirique}{distance entre la matrice de covariance empirique et T}$
+
+On pourra s'interroger sur l'évaluation de chaque quantité et notamment de la formule : 
+bruit sur la matrice de covariance empirique = \frac{1}{n}\sum_{t=1}^T ||x_tx_t^T-\Sigma||_F
+avec la norme de Frobenius.
+
+Nota : Le shrinkage se place souvent lorsque le ratio nombre de mesure sur nombre d'actifs est grosso modo une constante, même vitesse de croissance
+des deux indicateurs vers l'infini par exemple, ce qui correspond à un régime où le bootstrap est peu performant. 
