@@ -1,0 +1,330 @@
+---
+title: "Expérience 2"
+author: Joanna Moncelet
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(rgl)
+```
+
+## 0.Fonction f(X,Y) : IR\^2 -\> IR
+
+```{r}
+f_amp <- 1  #amplitude de f (=|f|)
+
+#uniforme:
+f <- function(X, Y, amp){
+    runif(length(X), -amp, amp)
+}
+
+#f <- function(X, Y, amp){
+#  amp * sin(sqrt(X^2 + Y^2))
+#}
+
+#f<- function(X, Y, amp){
+#  amp * (X^2 + Y^2)
+#}
+
+#Eggholder:
+#f <- function(X, Y, amp){
+#  amp * (-(Y + 47) * sin(sqrt(abs(X/2 + (Y + 47)))) - X * sin(sqrt(abs(X - (Y + 47)))))
+#}
+```
+
+# 1.Construction de la base vectorielle du plan affine IP passant par P et de normale n
+
+## 1.0. P et n(a,b,c) avec a \> b \> c \> 0
+
+```{r}
+set.seed(41)
+#P (x0,y0,z0):
+P <- c(1, 2, 3)
+
+#(a,b,c) les composantes du vecteur n :
+abc <- sort(runif(3, 0, 1), decreasing = TRUE) # 1>a>b>c>0
+
+#n (vecteur normal au plan)
+n <- abc/ sqrt(sum(abc^2)) 
+
+a <- n[1]
+b <- n[2]
+c <- n[3]
+
+#d = ax0 + by0 + cz0
+d <- a*P[1] + b*P[2] + c*P[3]
+```
+
+## 1a. On trouve la direction d'axe telle que la projection sur IP du point $P+e_k$ a une norme maximale. On appelle $P_i$ ce point.
+
+### H est la projection de $P (x_0,y_0,z_0)$ sur le plan affine IP d'équation $ax_0+by_0+cz_0=d$
+
+# $H= A - \frac{ax_0 + by_0 + cz_0 - d}{a^2 + b^2 + c^2}(a,b,c) = A - \frac{A*n - d}{||n|| ^2}n$
+
+```{r}
+# projection orthogonale de A sur le plan affine:
+projection <- function(A, n, d) {
+  A -((sum(A*n)- d)/ sum(n*n))*n 
+}
+
+#vecteurs canoniques:
+e1 <- c(1, 0, 0)
+e2 <- c(0, 1, 0)
+e3 <- c(0, 0, 1)
+
+# P_i = projection de P+ei sur le plan
+P1 <- projection(P+e1, n, d)
+P2 <- projection(P+e2, n, d)
+P3 <- projection(P+e3, n, d)
+
+#argmax de ||P_i||
+norme_Pi <- c(sqrt(sum(P1^2)), sqrt(sum(P2^2)), sqrt(sum(P3^2)))
+i0 <- which.max(norme_Pi)
+```
+
+## 1b. Comme P_i est dans IP, le vecteur v1 = PP_i / \|\|PP_i\|\| est un vecteur unitaire dans IP
+
+```{r}
+# vecteurs PP_i = P_i - P
+PP1 <- P1-P
+PP2 <- P2-P
+PP3 <- P3-P
+
+PP_i0 <- list(PP1, PP2, PP3)[[i0]] #ici, PP3
+
+#v1 vecteur unitaire dans IP:
+v1 <- PP_i0 / sqrt(sum(PP_i0^2))
+```
+
+## 1c. Par construction n et v1 sont orthogonaux, un autre vecteur v2 unitaire de IP s'obtient par n x v1 où x= le produit vectoriel
+
+```{r}
+produit_vectoriel <- function(u, v) {
+  c(u[2]*v[3] - u[3]*v[2],
+    u[3]*v[1] - u[1]*v[3],
+    u[1]*v[2] - u[2]*v[1])
+}
+
+#vecteur unitaire v2:
+v2 <- produit_vectoriel(n, v1)
+v2 <- v2 / sqrt(sum(v2^2))
+
+cat("v2 =", round(v2, 4), "\n")
+#verification de l'orthogonalité (=pdruit scalaire nul)
+cat("v1.v2=", round(sum(v1*v2), 10), "\n")
+cat("v1.n =", round(sum(v1*n), 10), "\n")
+cat("v2.n =", round(sum(v2* n), 10), "\n")
+```
+
+# 2. Pour une résolution h fixée, on prend tous les points (X,Y) = (i*h, j*h) pour i,j entiers dans \[-D, D\] ou entiers aléatoires uniformément répartis. On construit le point M par M = P + X*v1 + Y*v2 + f(X,Y)\*n
+
+```{r}
+h <- 1 #le pas
+D <- 5  #i et j dans [-5,5] par ex
+indices <- seq(-D, D, by = 1)
+X <- c()
+Y<- c()
+
+for (i in indices) {
+  for (j in indices) {
+    X <- c(X, i*h)
+    Y <- c(Y,j*h)
+  }
+}
+#boucle nous donne tous les points (i*h,j*h): (-5,-5), (-5,-4),...., (5,4), (5,5)
+
+#pour l'élévation hors du plan:
+f_XY <- f(X, Y, f_amp)
+
+n_pts <- length(X)
+
+# M = P+ X*v1 +Y*v2 + f(X,Y)*n :
+M <- matrix(0, nrow = n_pts, ncol = 3) #init.
+
+for (i in 1:n_pts) {
+  M[i,] <- P + X[i]*v1 + Y[i]*v2 + f_XY[i]*n
+}
+
+#= matrice M (121x3) (chq ligne est un point)
+```
+
+# Visualisation
+
+## Screeplot (proportion de variance expliquée par les k premieres VP)
+
+```{r}
+#matrice cov des pts M:
+matrice_cov <- cov(M)
+
+#valeurs/vecteurs propres:
+vp <- eigen(matrice_cov)
+valeurs_propres <- vp$values
+vecteurs_propres <- vp$vectors
+
+#% de la variance expliquéee par chq v.p:
+pourcentage <- valeurs_propres/ sum(valeurs_propres)*100
+
+#screeplot
+df_vp <- data.frame(
+  indice = factor(c("λ1","λ2","λ3"), levels = c("λ1", "λ2","λ3")),
+  valeur = valeurs_propres
+)
+
+ggplot(df_vp, aes(x = indice, y = valeur, group = 1)) +
+  geom_line() + geom_point(size = 3) +
+  labs(title = "Screeplot", x = "composante", y = "Valeur propre") + theme_minimal()
+
+#coude a lambda2: lambda 3 n'explique presque rien
+```
+
+## + graphique sur le % de variance expliquée cumulée
+
+```{r}
+df_vp$cumul <- cumsum(pourcentage) #on rajoute colonne avec les pourcentage expliqués cumulés
+
+ggplot(df_vp, aes(x = indice, y = cumul, group = 1)) +
+  geom_line() + geom_point(size = 3) +
+  geom_hline(yintercept = 95, color = "red", linetype = "dashed") +
+  ylim(0, 100) + labs(title = "Proportion de variance expliquée cumulée par nombre de valeur propre", x = "nombre de composantes", y = "% de variance expliquée") + theme_minimal()
+
+# seuil des 95% (en rouge) dépassé dès lambda 2
+# => rien qu'avec lambda 1 et 2 on explique presque 100% de la variance
+
+# IDEE: faire un graphique qui regroupe scree plot et variance expliquée cumulée (en barre)
+```
+
+# Vérification
+### Il est attendu d'avoir vp1, vp2 "dans" le plan et vp3 selon n.
+### Il est important de regarder comment avec l'eloignement cette propriété se perd.
+
+```{r}
+#eloignement nul pour vérifier la situation d'origine
+vp1 <- vecteurs_propres[,1]
+vp2 <- vecteurs_propres[,2]
+vp3 <- vecteurs_propres[,3]
+
+cat("<vp1, n>", round(sum(vp1 * n), 4), "\n") # ~0 : vp1 dans le plan => perpendiculaire a n => angle 90°=> produit scalire nul
+cat("<vp2, n>", round(sum(vp2 * n), 4), "\n") # ~0 pareil
+cat("<vp3, n>:", round(sum(vp3 * n), 4), "\n") # ~1 : vp3 selon n => angle 0° => produit scalaire = 1
+```
+
+### cas f=0: pas d'ecartement, tous les points sont dans le plan
+
+#### lambda_3 doit etre \~0 car il n'y a aucune variance hors du plan
+
+```{r}
+M_bis <- matrix(0, nrow = n_pts, ncol = 3) #init.
+for (i in 1:n_pts) {
+  M_bis[i,] <- P + X[i]*v1 + Y[i]*v2  # sans f_XY[i]*n (=0)
+}
+cat("λ3=", round(eigen(cov(M_bis))$values[3], 10)) #=0
+```
+
+### quand l'amplitude devient grande, vp3 se decroche de n
+
+```{r}
+amplitudes <- c(0, 0.1, 0.5, 1, 2, 5, 10) 
+alignement_vp3 <- numeric(length(amplitudes))#init
+
+for (k in 1:length(amplitudes)) {
+  f_test <- runif(n_pts, -amplitudes[k], amplitudes[k]) #pour chq pt, on tire au hasard un bruit dans [-amp,amp]
+  pts_test <- matrix(0, nrow = n_pts, ncol = 3) #init matrice des nv pts
+  for (i in 1:n_pts) {
+    pts_test[i,] <- P + X[i]*v1 + Y[i]*v2 + f_test[i]*n #on reconstruit les pts M avec le nv bruit
+  }
+  vp3_test <- eigen(cov(pts_test))$vectors[,3]
+  alignement_vp3[k] <- abs(sum(vp3_test * n)) # =produit scalaire= angle entre vp3 et n
+}
+
+ggplot(data.frame(amp = amplitudes, align = alignement_vp3), aes(x = amp, y = align)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 3) + ylim(0, 1) +
+  labs(title = "<vp3, n> en fonction de l'amplitude de f", x = "|f| (amplitude)", y = "<vp3, n>") +theme_minimal()
+
+# prod. scalaire=1 => angle entre vp3 et n de 0° (parallele)
+#prod.scal=0 => angle entre vp3 et n de 90° (perpendiculaire)
+#qd l'amplitude grandit, prod scalaire baisse, l'angle augmente: l'alignement se déteriore
+```
+
+# RGL
+
+```{r}
+#help(rgl)
+
+open3d()
+#points M:
+plot3d(M,type="s", radius=0.1, col="blue",size=1) #s pour sphere
+help(plot3d)
+
+#plan:
+grille_plan <- seq(-D, D, length.out = 10)
+pts_plan <- matrix(0, nrow = length(grille_plan)^2, ncol = 3) #init
+k <- 1
+for (i in grille_plan) {
+  for (j in grille_plan) {
+    pts_plan[k,] <- P + i*v1 + j*v2
+    k <- k + 1
+  }
+}
+points3d(pts_plan, col = "gray", size = 3)
+
+
+#point P:
+#help(spheres3d)
+spheres3d(P,radius=0.20, col="red",size= 2, )
+
+#Fleches (vecteurs):
+arrow3d(P,P+3*n,col = "red",lwd = 2, type = "lines") #n
+arrow3d(P,P+3*v1,col = "orange",  lwd = 2,type = "lines") #v1
+arrow3d(P,P+3*v2,col ="pink", lwd = 2, type = "lines") #v2
+
+#help(text3d)
+text3d(P+4*n,texts="n",col = "red")
+text3d(P+4*v1,texts = "v1",col ="orange")
+text3d(P+4*v2,texts = "v2",col = "pink")
+
+title3d("test rgl")
+```
+
+### + Méthode test and reject pour ellipsoïde:
+
+#### Equation d'un ellipsoïde: $\frac{x^2}{a^2} + \frac{y^2}{b^2} + \frac{z^2}{c^2} = 1$ avec $(a,b,c) \gt 0$ les demi-axes de l'ellipsoïde
+
+```{r}
+#semi-axes de l'ellipsoide:
+a <- 4
+b <- 2
+c <- 1
+
+#oracle= oui si le point P de coo (x,y,z) est dans l'ellipsoide, non sinon:
+oracle <- function(P) {
+  (P[1]^2 / a^2) + (P[2]^2 / b^2) + (P[3]^2 / c^2) <= 1
+}
+
+#boite englobante de l'ellipsoide
+n_cible <- 500
+points_ellipsoide <- matrix(0,nrow= n_cible, ncol = 3)#init
+compteur <- 0
+n_essais <- 0
+
+
+while (compteur < n_cible) {
+  P_tire <- c(runif(1, -a, a), runif(1, -b, b), runif(1, -c, c))
+  n_essais <- n_essais + 1
+  if (oracle(P_tire)) {
+    compteur<- compteur + 1
+    points_ellipsoide[compteur, ] <- P_tire
+  }
+}
+
+cat("points acceptes:", compteur,"\n")
+cat("points rejetes:", n_essais-compteur,"\n")
+cat("taux d'acceptation:", round(compteur/ n_essais * 100, 1), "% \n")
+
+#avec rgl:
+open3d()
+axes3d()
+spheres3d(points_ellipsoide,radius= 0.1, col="blue")
+```
