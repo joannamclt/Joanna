@@ -1,0 +1,316 @@
+---
+title: "Experiment 3"
+output: html_document
+author: "Joanna Moncelet"
+date: "2026-05-26"
+---
+
+```{r, setup, include=FALSE}
+library(MASS)
+library(ggplot2)
+library(readxl)
+library(rgl)
+```
+
+
+# Phase 1. Shrinkage
+## Matrice Sigma
+```{r}
+set.seed(42)
+n <- 3  #actifs
+T <- 50  #observations
+
+A <- matrix(runif(n*n, -1, 1), nrow= n)
+#en matrice SDP:
+Sigma <- t(A) %*% A + n*diag(n)  #=vraie matrice de covariance
+
+# Simulation des données : X ~ N(0, Sigma)
+X <- mvrnorm(T, mu=rep(0, n), Sigma=Sigma)
+```
+
+## Matrice covariance empirique + Matrice cible T
+```{r}
+#Cov empirique
+Sigma_emp <- cov(X)
+
+#cible 1 : T= sigma^2 * Id
+sigma2 <- mean(diag(Sigma_emp)) #var moyenne
+T1 <- sigma2 * diag(n)
+
+#Cible 2 : T= diag(Sigma_emp)  (garde que les variances)
+T2 <- diag(diag(Sigma_emp))
+
+#Cible 3 : T= id
+T3 <- diag(n)
+
+#shrinkage:
+shrink <- function(Sigma_emp, cible, lambda) {
+  (1 - lambda)*Sigma_emp + lambda*cible
+}
+```
+
+## Effet de $\lambda$ sur la distance à $\Sigma$ + comparaison des cibles T
+```{r}
+# Distance (norme Frobenius) entre deux matrices:
+frob <- function(A, B){
+  sqrt(sum((A - B)^2))
+}
+
+#liste des lambdas:
+lambdas <- seq(0, 1, by=0.01)
+
+dist_T1 <- numeric(length(lambdas))
+dist_T2 <- numeric(length(lambdas))
+dist_T3 <- numeric(length(lambdas))
+
+for(i in seq_along(lambdas)){
+  l <- lambdas[i]
+  dist_T1[i] <- frob(shrink(Sigma_emp, T1, l), Sigma)
+  dist_T2[i] <- frob(shrink(Sigma_emp, T2, l), Sigma)
+  dist_T3[i] <- frob(shrink(Sigma_emp, T3, l), Sigma)
+}
+
+df <- data.frame(
+  lambda = rep(lambdas, 3),
+  distance = c(dist_T1, dist_T2, dist_T3),
+  cible = rep(c("T= sigma²Id", "T= diag(emp)", "T= Id"), each = length(lambdas))
+)
+
+(comp_cible <- ggplot(df, aes(x = lambda, y = distance, color = cible)) + geom_line(linewidth=1) + geom_hline(yintercept = frob(Sigma_emp, Sigma), linetype = "dashed", color = "black") + labs(title= "Distance entre Sigma_shrink et Sigma selon la matrice cible et selon lambda", subtitle = "En pointillé noir: distance entre Sigma_emp et Sigma", x = "λ", y = "||Sigma_shrink - Sigma||_F",color = "Cible")+ theme_bw())
+
+#ggsave("./output/comparaison_cible.png",comp_cible)
+
+
+#T1= sigma^2 * Id a l'air d'etre la meilleure cible (distance minimum vers lambda= 0.6)
+```
+
+## Déformation des valeurs propres
+
+```{r}
+vp <- eigen(Sigma)$values
+vp_emp<- eigen(Sigma_emp)$values
+
+
+vp_lambda <- matrix(0, nrow= length(vp),ncol= length(lambdas))
+for (i in seq_along(lambdas)) {
+  vp_lambda[, i] <- eigen(shrink(Sigma_emp, T1, lambdas[i]))$values
+}
+
+df_vp <- data.frame(
+  lambda= rep(lambdas, times = nrow(vp_lambda)),
+  valeur= c(vp_lambda[1,], vp_lambda[2,], vp_lambda[3,]),
+  VP= rep(paste("VP", 1:nrow(vp_lambda)), each= length(lambdas))
+)
+
+(deformation <- ggplot(df_vp, aes(x= lambda, y= valeur,color= VP)) + geom_line(linewidth = 1) + geom_hline(yintercept = vp, linetype = "dashed", color= "black") + labs(title= "Déformation des valeurs propres par shrinkage",subtitle ="Matrice cible T= sigma² Id | En pointillés les vp sans shrinkage" ,x = "λ",y = "Valeurs propres", color= "VP")+ theme_bw())
+
+#ggsave("./output/deformation_vp_shrink.png",deformation)
+
+#les petites valeurs propres deviennent plus grandes et les grandes deviennent plus petites. 
+# Qd lambda=1, sigma_shrink= T, dont les val propres sont ttes = à 4.5
+```
+
+
+# Phase 2.Recherche de $\lambda$ par apprentissage validation
+## Monte-carlo cross validation
+
+```{r}
+#80% des données pour s'entrainer
+#20% pour valider
+
+set.seed(42)
+n_rep <- 200  # on repete bcp de fois pour pouvoir faire moyenne
+erreurs <- matrix(0, nrow = n_rep, ncol = length(lambdas))#init
+
+for (s in 1:n_rep) {
+  entrainement <- sample(1:nrow(X), size = floor(0.8 * nrow(X)),replace = FALSE)
+  validation<- setdiff(1:nrow(X), entrainement)
+
+  for (i in 1:length(lambdas)) {
+    Sigma_entr <- cov(X[entrainement, ])
+    T <- mean(diag(Sigma_entr))*diag(ncol(X)) #sigma^2*Id
+    Sigma_shrink <- shrink(Sigma_entr, T, lambdas[i])
+    erreurs[s, i]<- frob(Sigma_shrink, cov(X[validation, ]))
+  }
+}
+
+erreurs_moy <- colMeans(erreurs) #distance moyenne par lambda
+
+df <- data.frame(
+  lambda <- lambdas,
+  erreur <- erreurs_moy
+)
+
+lambda_mccv <- lambdas[which.min(erreurs_moy)] #lambda optimal= celui qui minimise l'erreur moyenne
+cat("λ optimal :", lambda_mccv, "\n")
+Sigma_mccv <- shrink(Sigma_emp, T1, lambda_mccv)
+
+(mc_cv <- ggplot(df, aes(x= lambda, y= erreur)) + geom_line() + geom_vline(xintercept= lambda_mccv, color= "red", linetype= "dashed") + geom_point(aes(x=lambda_mccv, y= min(erreurs_moy)), color = "red", size = 2) + annotate("text", x= lambda_mccv, y=max(erreurs_moy), label= paste("lambda* =", lambda_mccv), hjust= -0.1, color= "red") + labs(title= "Recherche de λ par validation croisée de Monte Carlo", x ="λ", y= "erreur moyenne (Frobenius)")) + theme_bw()
+
+#ggsave("./output/Cross_validation_mc.png",mc_cv)#ggsave("./output/Cross_validation_mc.png",mc_cv)erreur
+```
+
+# Phase 3. Selection de $\lambda $ analytiquement 
+## $\lambda* = \frac{\text{bruit_{cov_emp} empirique}}{\text{dist entre matrice de cov_emp et T}}$ avec bruit = $\frac{1}{n}\sum_{t=1}^T ||x_t x_t^T-\Sigma||_F$
+
+```{r}
+# Choix d'utiliser la formule de l'estimation du bruit de LedoitWolf (JMA2004, p.380 lemme 3.4): b^2= (1/n^2) sum ||xx^t - S ||^2
+```
+
+
+```{r}
+lambda_ledoit <- function(X, cible) {
+  T <- nrow(X)
+  Sigma_emp <- cov(X)
+  
+  #Numérateur= bruit sur la matrice empirique:
+  bruit_term <- numeric(T)
+  for (t in 1:T) {
+    xt <- matrix(X[t, ], ncol=1)
+    a <- xt %*% t(xt) 
+    bruit_term[t] <- frob(a, Sigma_emp)^2  
+  }
+  bruit <- mean(bruit_term)/T   # 1/n^2
+  
+  #Dénominateur= dist entre Sigma_emp et T:
+  denom <- frob(Sigma_emp, cible)^2  #choix de mettre au carré
+  
+  lambda_etoile <- bruit/denom
+  
+  list(lambda_etoile=lambda_etoile,
+       bruit=bruit,
+       denom=denom,
+       Sigma_emp=Sigma_emp)
+}
+
+#Application avec cible=T1
+lw <- lambda_ledoit(X, T1)
+Sigma_lw <- shrink(lw$Sigma_emp,T1,lw$lambda_etoile)
+lambda_lw <- lw$lambda_etoile
+
+cat("λ*=", lambda_lw, "\n")
+cat("Distance entre Sigma_shrink et sigma avec λ*:", frob(Sigma_lw, Sigma), "\n")
+
+# distance à Sigma pour chaque lambda:
+dist <- numeric(length(lambdas))
+for (i in 1:length(lambdas)) {
+  dist[i] <- frob(shrink(Sigma_emp, T1, lambdas[i]), Sigma)
+}
+
+df_lw <- data.frame(lambda = lambdas, distance = dist)
+
+ggplot(df_lw, aes(x = lambda, y = distance)) + geom_line() + geom_vline(xintercept = lambda_lw,color = "darkgreen", linetype = "dashed") + geom_point(aes(x = lambda_lw, y = frob(Sigma_lw, Sigma)), color = "darkgreen", size = 3) + annotate("text", x = lambda_lw, y = max(dist), label = paste("λ* =", round(lambda_lw, 3)),  hjust = -0.1, color = "darkgreen") + labs(title = "Distance à Sigma selon λ (cible sigma²Id)", subtitle = "Le point rouge est le λ* trouvé par Ledoit-Wolf",x= "λ", y= "||Sigma_shrink - Sigma||_F")+ theme_bw()
+
+
+
+```
+
+
+
+## Graphique de comparaison entre les lambda trouvés par Monte Carlo cross validation et LedoitWolf
+```{r}
+df_comp <- data.frame(lambda = lambdas, distance = dist)
+
+points_opt <- data.frame(
+  lambda= c(lambda_mccv, lambda_lw),
+  distance = c(
+    frob(shrink(Sigma_emp, T1, lambda_mccv),Sigma),
+    frob(shrink(Sigma_emp, T1, lambda_lw),Sigma)
+  ),
+  methode = c("MCCV", "Ledoit-Wolf")
+)
+
+(comp_lambda_opt <- ggplot(df_comp, aes(x = lambda, y = distance)) + geom_line(color = "black") + geom_point(data = points_opt, aes(x = lambda, y = distance, color = methode), size = 3) + geom_vline(data = points_opt, aes(xintercept = lambda, color = methode),linetype = "dashed", alpha = 0.5) + scale_color_manual(values = c("MCCV" = "red","Ledoit-Wolf" = "darkgreen")) + labs(title = "Comparaison des λ* selon les deux méthodes (cible sigma²Id)", x = "λ", y = "||Sigma_shrink - Sigma||_F", color = "Méthode") + theme_bw())
+
+#ggsave("./output/comparaison_lambda_opt.png",comp_lambda_opt)
+```
+
+## Visualisation RGL
+```{r}
+#origine P:
+P <- c(0,0,0)
+
+pts_vraie  <- mvrnorm(300, mu = rep(0, n), Sigma = Sigma)
+pts_shrink <- mvrnorm(300, mu = rep(0, n), Sigma = Sigma_lw)
+
+#vp:
+vp_vraie <- eigen(Sigma)$vectors
+vp_shrink <- eigen(Sigma_lw)$vectors
+
+
+open3d()
+spheres3d(P, radius=0.2, col="red")
+
+points3d(pts_vraie[, 1],  pts_vraie[, 2],  pts_vraie[, 3], col = "red", alpha = 0.4, size = 3)
+points3d(pts_shrink[, 1], pts_shrink[, 2], pts_shrink[, 3], col = "blue",  alpha = 0.4, size = 3)
+
+arrow3d(P, P+3*vp_vraie[,1],  col="red", lwd=2, type="lines")
+arrow3d(P, P+3*vp_vraie[,2], col="red",lwd=2, type="lines")
+arrow3d(P, P+3*vp_vraie[,3], col="red", lwd=2, type="lines")
+
+text3d(vp_vraie[,1]*3.3, texts="vp1", col="red")
+text3d(vp_vraie[,2]*3.3, texts="vp2", col="red")
+text3d(vp_vraie[,3]*3.3, texts="vp3", col="red")
+
+
+arrow3d(P, P+3*vp_shrink[,1],  col="blue", lwd=2, type="lines")
+arrow3d(P, P+3*vp_shrink[,2], col="blue",lwd=2, type="lines")
+arrow3d(P, P+3*vp_shrink[,3], col="blue", lwd=2, type="lines")
+
+text3d(vp_shrink[,1]*3.3, texts="vp1", col="blue")
+text3d(vp_shrink[,2]*3.3, texts="vp2", col="blue")
+text3d(vp_shrink[,3]*3.3, texts="vp3", col="blue")
+
+#axes3d()
+
+
+legend3d("topright", legend = c("Vraie Sigma", "Estimateur Sigma_chap (LW)"), col = c("red", "blue"), pch = 16)
+
+#rgl.snapshot()
+```
+
+
+## PRIAL (Percentage Relative Improvement in Average Loss)
+```{r}
+# PRIAL(lambda) = (||Sigma_emp - Sigma||^2 - ||Sigma_shrink - Sigma||^2)
+#                  /(||Sigma_emp - Sigma||^2 - ||T - Sigma||^2) * 100
+
+prial <- function(Sigma_shrink, Sigma_emp, cible, Sigma) {
+  num <- frob(Sigma_emp, Sigma)^2 - frob(Sigma_shrink, Sigma)^2
+  denom <- frob(Sigma_emp, Sigma)^2
+  (num / denom) * 100
+}
+
+#PRIAL pour chaque lambda (cible T1 = sigma²*Id)
+prial_vals <- numeric(length(lambdas)) #init
+for (i in 1:length(lambdas)) {
+  Sigma_s <- shrink(Sigma_emp, T1, lambdas[i])
+  prial_vals[i] <- prial(Sigma_s, Sigma_emp, T1, Sigma)
+}
+
+#PRIAL pour MCCV et LW:
+prial_mccv <- prial(Sigma_mccv, Sigma_emp, T1, Sigma)
+prial_lw <- prial(Sigma_lw, Sigma_emp, T1, Sigma)
+
+cat("PRIAL MCCV (lambda =", round(lambda_mccv, 3), "):", round(prial_mccv, 2), "%\n")
+cat("PRIAL Ledoit-Wolf (lambda =", round(lambda_lw, 3), "):", round(prial_lw,   2), "%\n")
+
+```
+
+### Visualisation PRIAL
+```{r}
+df_prial <- data.frame(lambda = lambdas, prial = prial_vals)
+
+points_prial <- data.frame(
+  lambda  = c(lambda_mccv, lambda_lw),
+  prial   = c(prial_mccv,  prial_lw),
+  methode = c("MCCV", "Ledoit-Wolf")
+)
+
+(gg_prial <- ggplot(df_prial, aes(x = lambda, y = prial)) + geom_line(linewidth = 1, color = "black") + geom_hline(yintercept = 100, linetype = "dashed", color = "gray50") + geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") + geom_point(data = points_prial, aes(x = lambda, y = prial, color = methode), size = 3) + geom_vline(data = points_prial, aes(xintercept = lambda, color = methode),linetype = "dashed", alpha = 0.5) + scale_color_manual(values = c("MCCV" = "red", "Ledoit-Wolf" = "darkgreen")) + annotate("text", x = 0.02, y = 103, label = "100% : Sigma_shrink = Sigma", hjust = 0, size = 3, color = "gray40") + annotate("text", x = 0.02, y =  -3, label = "0% : pas d'amélioration, Sigma_shrink = Sigma_emp",
+hjust = 0, size = 3, color = "gray40") + labs(title = "PRIAL selon λ", subtitle = "cible T = σ²Id", x = "λ", y = "PRIAL (%)", color= "Méthode") + theme_bw())
+
+#ggsave("./output/prial.png", gg_prial)
+
+```
+
