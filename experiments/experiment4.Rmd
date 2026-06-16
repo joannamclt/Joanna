@@ -1,0 +1,309 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-06-09"
+---
+
+```{r, include=FALSE}
+library(monomvn)
+library(ggplot2)
+library(reshape2)
+library(MASS)
+library(quadprog)
+library(dplyr)
+library(rgl)
+```
+
+# 1. Génération de données avec historiques différents
+```{r}
+set.seed(42)
+m <- 10  # nb actifs
+n <- 100  # longueur max d'historique
+
+#" randmvn generates random samples from a randomly generated MVN distribution"
+donnees <- randmvn(n, m)
+
+Y_complet <- donnees$x   #matrice sans NA
+Sigma_vraie <- donnees$S
+
+# "rmono imposes a uniformly distributed monotone missingness pattern"
+Y <- rmono(Y_complet)
+Y <- Y[, order(colSums(!is.na(Y)), decreasing = TRUE)]
+
+cat("Longueur des historiques par actif :\n")
+print(colSums(!is.na(Y)))
+```
+
+#Visu de la matrice
+```{r}
+df <- melt(is.na(Y))
+colnames(df) <- c("temps", "actif", "manquant")
+
+ggplot(df, aes(x = actif, y = temps, fill = manquant)) + geom_tile() + scale_fill_manual(values = c("FALSE" = "lightblue", "TRUE" = "white")) + scale_y_reverse() + labs(title = "Matrice d'actifs avec des historique différents",x = "Actifs", y = "Temps") + theme_bw() + theme(legend.position = "none", axis.text = element_text(size = 9))
+```
+
+
+## Méthode de régression nécessaire pour chaque actif
+```{r}
+# Pour chaque actif j, on choisit OLS ou parcimonieux selon le seuil p
+p <- 0.25
+p_evol <- c(0,0.25,0.50,0.75,1)
+
+for (j in 1:m) {
+  nj <- sum(!is.na(Y[, j])) # nb obs de l'actif j
+  if (nj > j / p) {
+    cat("Actif", j, ": OLS (", nj, "obs,", j-1, "prédicteurs)\n")
+  } else {
+    cat("Actif", j, ": Parcimonieux (", nj, "obs,", j-1, "prédicteurs)\n")
+  }
+}
+```
+
+### avec p qui évolue:
+```{r}
+p_evol <- c(0, 0.25, 0.50, 0.75, 1)
+
+df <- data.frame(matrix(nrow = m, ncol = length(p_evol)))
+rownames(df) <- paste0("Actif", 1:m)
+colnames(df) <- as.character(p_evol)
+
+for (p in p_evol) {
+  df["Actif1", as.character(p)] <- "OLS"
+  for (j in 2:m) {
+    nj <- sum(!is.na(Y[, j]))
+    if (nj > j/p) {
+      df[paste0("Actif", j), as.character(p)] <- "OLS"
+    } else {
+      df[paste0("Actif", j), as.character(p)] <- "Parcimonieux"
+    }
+  }
+}
+
+print(df)
+```
+
+
+
+# 2.Estimateur "complet" (perte info colossale)
+```{r}
+n_obs_complete <- min(colSums(!is.na(Y)))
+Sigma_complete <- cov(Y[1:n_obs_complete, ])
+#View(Sigma_complete)
+
+cat("on ne garde que",nrow(Sigma_complete), "observations sur", n)
+```
+
+# 3. méthodes de regression avec monomvn
+```{r}
+# PCR (principal component regression):
+fit_pcr <- monomvn(Y, method = "pcr", p = 0.25)
+Sigma_pcr <- fit_pcr$S
+
+#PLSR (partial least squares regression):
+fit_plsr <- monomvn(Y, method = "plsr", p= 0.25)
+Sigma_plsr <- fit_plsr$S
+
+# Lasso:
+fit_lasso <- monomvn(Y, method = "lasso", p = 0.25)
+Sigma_lasso <- fit_lasso$S
+
+# Ridge:
+fit_ridge <- monomvn(Y, method = "ridge", p = 0.25)
+Sigma_ridge <- fit_ridge$S
+```
+
+# 4. Comparation des estimations avec divergence KL 
+
+# KL(Sigma_hat || Sigma) = 0.5*(log(|Sigma_hat|/|Sigma|) + tr(Sigma_hat^{-1} Sigma)  + (mu_chap - mu)^T * Sigma_hat^{-1} * (mu_chap - mu))  (Gramacy p.21)
+
+```{r}
+kl <- function(Sigma_hat, Sigma_vraie) {
+  m <- nrow(Sigma_vraie)
+  d <- det(Sigma_hat)
+  if (d <= 0) return(NA) #pas inversible
+
+  mu_hat   <- colMeans(Y, na.rm = TRUE)
+  mu <- colMeans(Y_complet)
+
+  log_ratio <- log(det(Sigma_hat)) - log(det(Sigma_vraie))
+  tr <- sum(diag(ginv(Sigma_hat) %*% Sigma_vraie))
+
+  diff_mu  <- mu_hat - mu
+  terme_mu <- t(diff_mu) %*% ginv(Sigma_hat) %*% diff_mu
+
+  0.5 * (log_ratio + tr + terme_mu - m)
+}
+
+
+cat("\nDivergence KL\n")
+cat("Complete :", round(kl(Sigma_complete, Sigma_vraie), 4), "\n")
+cat("     PCR :", round(kl(Sigma_pcr,Sigma_vraie), 4), "\n")
+cat("   Lasso :", round(kl(Sigma_lasso,Sigma_vraie), 4), "\n")
+cat("   Ridge :", round(kl(Sigma_ridge, Sigma_vraie), 4), "\n")
+cat("    PLSR :", round(kl(Sigma_plsr, Sigma_vraie), 4), "\n")
+
+```
+
+
+
+
+# Comparaison des méthodes
+
+```{r}
+set.seed(42)
+m <- 10
+n <- 100
+repet <- 200
+
+resultats <- data.frame(methode = character(), KL = numeric(), variance = numeric())
+
+# Sigma vraie fixe pour toutes les répétitions
+donnees <- randmvn(n, m)
+
+Sigma_vraie <- donnees$S
+
+for (i in 1:repet) {
+  Y_complet <- randmvn(n, m)$x  # nv données à chq répétition
+  Y <- rmono(Y_complet)
+  Y <- Y[, order(colSums(!is.na(Y)), decreasing = TRUE)]
+
+  for (methode in c("pcr", "lasso", "ridge", "plsr")) {
+    fit <- monomvn(Y, method = methode, p = 0.25)
+    S <- fit$S
+
+    # portefeuille minimum variance (Stambaugh eq.87)
+    uns <- rep(1, m)
+    w <- ginv(S) %*% uns
+    w <- w / sum(w)
+
+    variance <- as.numeric(t(w) %*% Sigma_vraie %*% w)
+    KL <- kl(S, Sigma_vraie)
+
+    resultats <- rbind(resultats, data.frame(
+      methode = methode,
+      variance = variance,
+      KL = KL
+    ))
+  }
+}
+
+# Résumé (moyenne sur les 200 repet.)
+resume <- resultats %>% group_by(methode) %>%
+  summarise(
+    KL_moyen  = round(mean(KL, na.rm = TRUE), 4),
+    ecart_type_moy = round(mean(sqrt(variance)), 4)
+  )
+print(resume)
+
+
+#KL et ecart type sont min pour PCR 
+```
+
+
+
+## Comparaison visuelle
+```{r}
+vp_vraie <- eigen(Sigma_vraie)$values
+vp_lasso <- eigen(Sigma_lasso)$values
+vp_ridge <- eigen(Sigma_ridge)$values
+vp_pcr <- eigen(Sigma_pcr)$values
+vp_complete <- eigen(Sigma_complete)$values
+
+# Screeplot
+plot(vp_vraie, type="b", col="black", pch=19, main="Valeurs propres", xlab="Rang", ylab="Valeur propre")
+lines(vp_lasso, type="b", col="red",   pch=19)
+lines(vp_ridge, type="b", col="green", pch=19)
+lines(vp_pcr, type="b", col="blue", pch=19)
+lines(vp_complete, type="b", col="orange", pch=19)
+legend("topright", c("Vraie","Lasso","Ridge","PCR","complete"),
+       col=c("black","red","green","blue","orange"), lty=1)
+
+# Erreur sur chaque valeur propre
+plot(abs(vp_lasso - vp_vraie), type="b", col="red", pch=19, main="Erreur sur les valeurs propres", xlab="Rang", ylab="|vp_estimée - vp_vraie|")
+lines(abs(vp_ridge - vp_vraie), type="b", col="green", pch=19)
+lines(abs(vp_pcr - vp_vraie), type="b", col="blue", pch=19)
+lines(abs(vp_complete- vp_vraie), type="b", col="orange", pch=19)
+legend("topright", c("Lasso","Ridge","PCR","complete"), col=c("red","green","blue","orange"), lty=1)
+```
+
+
+
+## Visualisation RGL (vraie sigma, complete et PCR)
+```{r}
+set.seed(42)
+m2 <- 3 #pour 3D
+n2 <- 15  
+
+donnees2 <- randmvn(n2, m2)
+Y_complet2 <- donnees2$x
+Sigma_vraie2 <- donnees2$S
+Y2 <- rmono(Y_complet2)
+Y2 <- Y[, order(colSums(!is.na(Y2)), decreasing = TRUE)]
+
+###################################################################
+
+n_obs_complete2 <- min(colSums(!is.na(Y2)))
+Sigma_complete2 <- cov(Y2[1:n_obs_complete2, ])
+
+# PCR (principal component regression):
+fit_pcr2 <- monomvn(Y2, method = "pcr", p = 0.25)
+Sigma_pcr2 <- fit_pcr2$S
+
+# Lasso:
+fit_lasso2 <- monomvn(Y2, method = "lasso", p = 0.25)
+Sigma_lasso2 <- fit_lasso2$S
+
+# Ridge:
+fit_ridge2 <- monomvn(Y2, method = "ridge", p = 0.25)
+Sigma_ridge2 <- fit_ridge2$S
+
+#####################################################################
+
+#origine P:
+P <- c(0,0,0)
+
+pts_vraie  <- mvrnorm(300, mu = rep(0, m2), Sigma = Sigma_vraie2)
+pts_complete <- mvrnorm(300, mu = rep(0, m2), Sigma = Sigma_complete2)
+pts_pcr  <- mvrnorm(300, mu = rep(0, m2), Sigma = Sigma_pcr2)
+
+#vp:
+vect_vraie <- eigen(Sigma_vraie2)$vectors
+vect_complete <- eigen(Sigma_complete2)$vectors
+vect_pcr <- eigen(Sigma_pcr2)$vectors
+
+open3d()
+spheres3d(P, radius=0.2, col="red")
+
+points3d(pts_vraie[, 1],  pts_vraie[, 2],  pts_vraie[, 3], col = "red", alpha = 0.4, size = 3)
+points3d(pts_complete[, 1], pts_complete[, 2], pts_complete[, 3], col = "orange",  alpha = 0.4, size = 3)
+points3d(pts_pcr[, 1], pts_pcr[, 2], pts_pcr[, 3], col = "blue",  alpha = 0.4, size = 3)
+
+arrow3d(P, P+2*vect_vraie[,1],  col="red", lwd=2, type="lines")
+arrow3d(P, P+2*vect_vraie[,2], col="red",lwd=2, type="lines")
+arrow3d(P, P+2*vect_vraie[,3], col="red", lwd=2, type="lines")
+
+text3d(vect_vraie[,1]*2.3, texts="vp1", col="red")
+text3d(vect_vraie[,2]*2.3, texts="vp2", col="red")
+text3d(vect_vraie[,3]*2.3, texts="vp3", col="red")
+
+
+arrow3d(P, P+2*vect_pcr[,1],  col="blue", lwd=2, type="lines")
+arrow3d(P, P+2*vect_pcr[,2], col="blue",lwd=2, type="lines")
+arrow3d(P, P+2*vect_pcr[,3], col="blue", lwd=2, type="lines")
+
+text3d(vect_pcr[,1]*2.3, texts="vp1", col="blue")
+text3d(vect_pcr[,2]*2.3, texts="vp2", col="blue")
+text3d(vect_pcr[,3]*2.3, texts="vp3", col="blue")
+
+arrow3d(P, P+2*vect_complete[,1],  col="orange", lwd=2, type="lines")
+arrow3d(P, P+2*vect_complete[,2], col="orange",lwd=2, type="lines")
+arrow3d(P, P+2*vect_complete[,3], col="orange", lwd=2, type="lines")
+
+text3d(vect_complete[,1]*2.3, texts="vp1", col="orange")
+text3d(vect_complete[,2]*2.3, texts="vp2", col="orange")
+text3d(vect_complete[,3]*2.3, texts="vp3", col="orange")
+
+
+legend3d("topright", legend = c("Vraie Sigma", "Sigma_pcr","Sigma_complete"), col = c("red", "blue","orange"), pch = 16)
+```
+
